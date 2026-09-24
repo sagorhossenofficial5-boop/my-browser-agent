@@ -1,0 +1,14 @@
+{
+  "cookies": [],
+  "origins": [
+    {
+      "origin": "https://duckduckgo.com",
+      "localStorage": [
+        {
+          "name": "ddg-promotions",
+          "value": "{\"sidemenu-browser-promo-2026-04\":{\"type\":\"periodic\",\"schemaVersion\":2,\"impressionCount\":0}}"
+        }
+      ]
+    }
+  ]
+}

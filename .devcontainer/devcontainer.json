@@ -1,16 +1,10 @@
 {
-  "name": "Browser Runner Environment",
-  "forwardPorts": [3000, 4000],
+  "name": "Browser Runner",
   "portsAttributes": {
     "3000": {
-      "label": "Runner Server",
+      "label": "Browser Runner",
       "visibility": "public",
-      "onAutoForward": "notify"
-    },
-    "4000": {
-      "label": "Secondary Port",
-      "visibility": "public",
-      "onAutoForward": "notify"
+      "onAutoForward": "silent"
     }
   }
 }

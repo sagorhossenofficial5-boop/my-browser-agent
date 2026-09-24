@@ -1,0 +1,5 @@
+2026/09/24-07:51:24.530 1b5f5 Reusing MANIFEST /workspaces/my-browser-agent/chrome_profile/Default/Local Storage/leveldb/MANIFEST-000001
+2026/09/24-07:51:24.531 1b5f5 Recovering log #3
+2026/09/24-07:51:24.579 1b5f5 Level-0 table #3: started
+2026/09/24-07:51:24.598 1b5f5 Level-0 table #3: 36743 bytes OK
+2026/09/24-07:51:24.605 1b5f5 Delete type=0 #3
