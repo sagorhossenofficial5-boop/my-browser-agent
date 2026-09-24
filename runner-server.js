@@ -25,16 +25,25 @@ app.post('/agent-command', async (req, res) => {
 
   let browser = null;
   try {
+    const chromePath = process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath();
+    console.log('Puppeteer cache:', process.env.PUPPETEER_CACHE_DIR);
+    console.log('Launching Chrome from path:', chromePath);
+    log(`Resolved Chrome path: ${chromePath}`);
+
     browser = await puppeteer.launch({
-      headless: 'new',
+      headless: true,
+      executablePath: chromePath,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--disable-gpu',
-        '--no-zygote',
-        '--single-process'
-      ]
+        '--disable-software-rasterizer',
+        '--disable-extensions',
+        '--no-first-run',
+        '--no-default-browser-check'
+      ],
+      timeout: 60000
     });
 
     const page = await browser.newPage();
@@ -87,6 +96,7 @@ app.post('/agent-command', async (req, res) => {
     });
 
   } catch (err) {
+    console.error('Execution error:', err);
     log(`Execution error: ${err.message}`);
     if (browser) await browser.close();
     return res.status(500).json({
