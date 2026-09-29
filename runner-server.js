@@ -1,6 +1,7 @@
 const express = require('express');
 const puppeteer = require('puppeteer');
-const TelegramBot = require('node-telegram-bot-api');
+const TelegramBotModule = require('node-telegram-bot-api');
+const BotConstructor = TelegramBotModule.default || TelegramBotModule;
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
@@ -122,7 +123,7 @@ function startTelegramBot() {
     return null;
   }
 
-  const bot = new TelegramBot(token, { polling: true });
+  const bot = new BotConstructor(token, { polling: true });
   console.log('🤖 Telegram Bot initialized and polling for messages...');
 
   bot.on('polling_error', (err) => {
@@ -155,8 +156,6 @@ function startTelegramBot() {
   };
 
   bot.on('message', handleText);
-  bot.on('polling_error', (err) => console.error('Telegram polling_error:', err.message));
-
   console.log('🤖 Telegram Bot handlers registered (/start, /health, /status, start, hi, hello, login).');
   return bot;
 }
