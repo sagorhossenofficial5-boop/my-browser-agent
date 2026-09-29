@@ -1,7 +1,7 @@
 const express = require('express');
 const puppeteer = require('puppeteer');
 
-// ১. auto_fill_and_submit সেফ ইমপোর্ট (সকল এক্সপোর্ট ফরম্যাট সাপোর্ট)
+// ১. auto_fill_and_submit সেফ ইমপোর্ট
 let automationRunner = null;
 try {
   const importedModule = require('./auto_fill_and_submit');
@@ -25,7 +25,7 @@ app.use(express.json());
 
 let browserInstance = null;
 let pageInstance = null;
-let isBrowserBusy = false; // ব্রাউজার কনফ্লিক্ট আটকানোর লক
+let isBrowserBusy = false;
 
 // ২. Puppeteer ব্রাউজার ইনিশিয়ালাইজেশন
 async function getBrowserPage() {
@@ -74,7 +74,6 @@ app.get('/snapshot', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
     res.send(screenshot);
   } catch (err) {
-    // এরর হলে ৫03 দিবে, ফ্রন্টএন্ডে আগের ফ্রেমই থেকে যাবে—কালো হবে না
     res.status(503).end();
   }
 });
@@ -130,21 +129,35 @@ app.get(['/', '/live'], (req, res) => {
   `);
 });
 
-// ৪. টেলিগ্রাম ফটো ও মেসেজ সেন্ডার (Native Fetch)
+// ৪. টেলিগ্রাম সেন্ডার ফাংশনসমূহ
 async function sendTelegramPhoto(token, chatId, imageBuffer, caption) {
   try {
-    const boundary = '----TelegramFormBoundary' + Math.random().toString(36).substring(2);
-    let body = Buffer.concat([
-      Buffer.from(\`--\${boundary}\\r\\nContent-Disposition: form-data; name="chat_id"\\r\\n\\r\\n\${chatId}\\r\\n\`),
-      Buffer.from(\`--\${boundary}\\r\\nContent-Disposition: form-data; name="caption"\\r\\n\\r\\n\${caption}\\r\\n\`),
-      Buffer.from(\`--\${boundary}\\r\\nContent-Disposition: form-data; name="photo"; filename="screen.jpg"\\r\\nContent-Type: image/jpeg\\r\\n\\r\\n\`),
+    const boundary = '----WebKitFormBoundary' + Math.random().toString(36).substring(2);
+    const crlf = '\r\n';
+    
+    let head = '--' + boundary + crlf;
+    head += 'Content-Disposition: form-data; name="chat_id"' + crlf + crlf;
+    head += chatId + crlf;
+
+    head += '--' + boundary + crlf;
+    head += 'Content-Disposition: form-data; name="caption"' + crlf + crlf;
+    head += caption + crlf;
+
+    head += '--' + boundary + crlf;
+    head += 'Content-Disposition: form-data; name="photo"; filename="screen.jpg"' + crlf;
+    head += 'Content-Type: image/jpeg' + crlf + crlf;
+
+    const tail = crlf + '--' + boundary + '--' + crlf;
+
+    const body = Buffer.concat([
+      Buffer.from(head, 'utf-8'),
       imageBuffer,
-      Buffer.from(\`\\r\\n--\${boundary}--\\r\\n\`)
+      Buffer.from(tail, 'utf-8')
     ]);
 
-    await fetch(\`https://api.telegram.org/bot\${token}/sendPhoto\`, {
+    await fetch('https://api.telegram.org/bot' + token + '/sendPhoto', {
       method: 'POST',
-      headers: { 'Content-Type': \`multipart/form-data; boundary=\${boundary}\` },
+      headers: { 'Content-Type': 'multipart/form-data; boundary=' + boundary },
       body: body
     });
   } catch (err) {
@@ -154,7 +167,7 @@ async function sendTelegramPhoto(token, chatId, imageBuffer, caption) {
 
 async function sendTelegramMessage(token, chatId, text) {
   try {
-    await fetch(\`https://api.telegram.org/bot\${token}/sendMessage\`, {
+    await fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, text: text })
@@ -162,10 +175,10 @@ async function sendTelegramMessage(token, chatId, text) {
   } catch (e) {}
 }
 
-// ৫. এজেন্ট কমান্ড ও অটোমেশন এক্সিকিউটর (বাগ ফিক্সড ও শর্টকাট রুটসহ)
+// ৫. এজেন্ট কমান্ড ও অটোমেশন হ্যান্ডলার
 async function handleAgentCommand(commandText, token, chatId) {
   if (isBrowserBusy) {
-    return sendTelegramMessage(token, chatId, '⏳ Browser is currently busy performing another task. Please wait a moment...');
+    return sendTelegramMessage(token, chatId, '⏳ Browser is currently busy. Please wait a moment...');
   }
 
   isBrowserBusy = true;
@@ -175,11 +188,10 @@ async function handleAgentCommand(commandText, token, chatId) {
 
   try {
     page = await getBrowserPage();
-    await sendTelegramMessage(token, chatId, \`⚡ Executing: "\${text}"...\`);
+    await sendTelegramMessage(token, chatId, '⚡ Executing: "' + text + '"...');
 
-    // ব্রাউজিং ও শর্টকাট রুটস
     if (lower.startsWith('/goto ') || lower.startsWith('goto ')) {
-      let targetUrl = text.replace(/^\\/?goto\\s+/i, '').trim();
+      let targetUrl = text.replace(/^\/?goto\s+/i, '').trim();
       if (!targetUrl.startsWith('http')) targetUrl = 'https://' + targetUrl;
       await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 25000 });
     } else if (lower.includes('chatgpt') || lower.includes('openai')) {
@@ -200,40 +212,36 @@ async function handleAgentCommand(commandText, token, chatId) {
       }
     }
 
-    // অটোমেশন হেল্পার এক্সিকিউশন
     if (typeof automationRunner === 'function') {
       try {
         console.log('🤖 Triggering automation module...');
         await automationRunner(page, text);
       } catch (autoErr) {
-        console.error('Automation module execution error:', autoErr.message);
+        console.error('Automation error:', autoErr.message);
       }
     }
 
     const buffer = await page.screenshot({ type: 'jpeg', quality: 60, timeout: 15000 });
-    await sendTelegramPhoto(token, chatId, buffer, \`✅ Done! Current URL:\\n\${page.url()}\`);
+    await sendTelegramPhoto(token, chatId, buffer, '✅ Done! Current URL:\n' + page.url());
   } catch (actionErr) {
-    await sendTelegramMessage(token, chatId, \`⚠️ Task status: \${actionErr.message}\`);
+    await sendTelegramMessage(token, chatId, '⚠️ Task status: ' + actionErr.message);
     if (page) {
       try {
         const fallbackBuf = await page.screenshot({ type: 'jpeg', quality: 50, timeout: 5000 });
-        await sendTelegramPhoto(token, chatId, fallbackBuf, \`Current view:\\n\${page.url()}\`);
+        await sendTelegramPhoto(token, chatId, fallbackBuf, 'Current view:\n' + page.url());
       } catch (e) {}
     }
   } finally {
-    isBrowserBusy = false; // নিশ্চিতভাবে লক রিলিজ
+    isBrowserBusy = false;
   }
 }
 
 // ৬. টেলিগ্রাম পোলিং ইঞ্জিন
 async function startTelegramBot(token) {
-  if (!token) {
-    console.log('No TELEGRAM_BOT_TOKEN provided.');
-    return;
-  }
+  if (!token) return;
 
   try {
-    await fetch(\`https://api.telegram.org/bot\${token}/deleteWebhook?drop_pending_updates=true\`);
+    await fetch('https://api.telegram.org/bot' + token + '/deleteWebhook?drop_pending_updates=true');
   } catch (e) {}
 
   console.log('🤖 Telegram native bot polling starting...');
@@ -241,7 +249,7 @@ async function startTelegramBot(token) {
 
   async function poll() {
     try {
-      const res = await fetch(\`https://api.telegram.org/bot\${token}/getUpdates?offset=\${offset}&timeout=30\`);
+      const res = await fetch('https://api.telegram.org/bot' + token + '/getUpdates?offset=' + offset + '&timeout=30');
       const data = await res.json();
       if (data.ok && data.result.length > 0) {
         for (const update of data.result) {
@@ -254,14 +262,14 @@ async function startTelegramBot(token) {
           const chatId = msg.chat.id;
 
           if (lower === '/start' || lower === 'start' || lower === 'hi') {
-            await sendTelegramMessage(token, chatId, '🤖 Autonomous Browser Agent is LIVE on Render 24/7!\\n\\nCommands:\\n• /screen\\n• /goto <url>\\n• Just type any query or automation task!');
+            await sendTelegramMessage(token, chatId, '🤖 Autonomous Browser Agent is LIVE on Render 24/7!\n\nCommands:\n• /screen\n• /goto <url>\n• Just type any query or task!');
           } else if (lower === '/status' || lower === 'status' || lower === '/health') {
             const page = await getBrowserPage();
-            await sendTelegramMessage(token, chatId, \`✅ System Health: Operational\\n🔗 Active URL: \${page.url()}\\n📌 Status: \${isBrowserBusy ? 'Busy' : 'Ready'}\`);
+            await sendTelegramMessage(token, chatId, '✅ System Health: Operational\n🔗 Active URL: ' + page.url() + '\n📌 Status: ' + (isBrowserBusy ? 'Busy' : 'Ready'));
           } else if (lower === '/screen' || lower === 'screen') {
             const page = await getBrowserPage();
             const buffer = await page.screenshot({ type: 'jpeg', quality: 60, timeout: 15000 });
-            await sendTelegramPhoto(token, chatId, buffer, \`📸 \${page.url()}\`);
+            await sendTelegramPhoto(token, chatId, buffer, '📸 ' + page.url());
           } else {
             await handleAgentCommand(rawText, token, chatId);
           }
@@ -278,7 +286,7 @@ async function startTelegramBot(token) {
 }
 
 app.listen(PORT, async () => {
-  console.log(\`Runner listening on port \${PORT}\`);
+  console.log('Runner listening on port ' + PORT);
   await getBrowserPage().catch(err => console.error('Browser launch error:', err));
   startTelegramBot(TELEGRAM_BOT_TOKEN);
 });
