@@ -115,61 +115,63 @@ app.post('/agent-command', async (req, res) => {
 });
 
 async function startTelegramBot(token) {
-  try {
-    const rawModule = await import('node-telegram-bot-api');
-    let TelegramBot = rawModule;
-
-    while (TelegramBot && typeof TelegramBot !== 'function') {
-      if (TelegramBot.default) {
-        TelegramBot = TelegramBot.default;
-      } else if (TelegramBot.TelegramBot) {
-        TelegramBot = TelegramBot.TelegramBot;
-      } else {
-        break;
-      }
-    }
-
-    if (typeof TelegramBot !== 'function') {
-      const { createRequire } = await import('module');
-      const localRequire = createRequire(__filename);
-      TelegramBot = localRequire('node-telegram-bot-api');
-
-      while (TelegramBot && typeof TelegramBot !== 'function') {
-        if (TelegramBot.default) {
-          TelegramBot = TelegramBot.default;
-        } else if (TelegramBot.TelegramBot) {
-          TelegramBot = TelegramBot.TelegramBot;
-        } else {
-          break;
-        }
-      }
-    }
-
-    if (typeof TelegramBot !== 'function') {
-      throw new TypeError('Unable to resolve node-telegram-bot-api constructor');
-    }
-
-    const bot = new TelegramBot(token, { polling: true });
-    console.log('🤖 Telegram Bot initialized and polling for messages...');
-
-    bot.on('polling_error', (err) => console.error('Telegram Polling Error:', err.message));
-
-    bot.onText(/\/?(start|hi|hello)/i, (msg) => {
-      bot.sendMessage(msg.chat.id, 'Agent is online and ready 24/7! Type /help or /status')
-        .catch((err) => console.error('Telegram sendMessage error:', err.message));
-    });
-
-    bot.onText(/\/?(status|health)/i, (msg) => {
-      bot.sendMessage(msg.chat.id, '✅ All systems operational on Render (24/7 Keep-Alive).')
-        .catch((err) => console.error('Telegram sendMessage error:', err.message));
-    });
-
-    console.log('🤖 Telegram Bot handlers registered.');
-    return bot;
-  } catch (error) {
-    console.error('Failed to initialize Telegram Bot:', error);
-    return null;
+  if (!token) {
+    console.log('No TELEGRAM_BOT_TOKEN provided, skipping bot start.');
+    return;
   }
+
+  console.log('🤖 Starting native Telegram bot polling...');
+  let offset = 0;
+
+  async function sendMessage(chatId, text) {
+    try {
+      const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, text })
+      });
+      if (!res.ok) {
+        const body = await res.text();
+        console.error('Failed to send telegram message:', res.status, body);
+      }
+    } catch (e) {
+      console.error('Failed to send telegram message:', e.message);
+    }
+  }
+
+  async function poll() {
+    try {
+      const res = await fetch(`https://api.telegram.org/bot${token}/getUpdates?offset=${offset}&timeout=30`);
+      const data = await res.json();
+      if (data.ok && Array.isArray(data.result) && data.result.length > 0) {
+        for (const update of data.result) {
+          offset = update.update_id + 1;
+          const msg = update.message;
+          if (msg && msg.text) {
+            const text = msg.text.trim().toLowerCase();
+            const chatId = msg.chat.id;
+
+            if (text.startsWith('/start') || text === 'start' || text === 'hi' || text === 'hello') {
+              await sendMessage(chatId, '🤖 Agent is online and ready 24/7 on Render! Type /status to check health.');
+            } else if (text.startsWith('/status') || text === 'status' || text.startsWith('/health') || text === 'health') {
+              await sendMessage(chatId, '✅ All systems operational on Render (24/7 Keep-Alive active).');
+            } else {
+              await sendMessage(chatId, `Received: "${msg.text}". Agent is active.`);
+            }
+          }
+        }
+      } else if (!data.ok) {
+        console.error('Telegram API polling error:', data.description || 'Unknown Telegram API error');
+      }
+    } catch (err) {
+      console.error('Telegram polling error:', err.message);
+      await new Promise(r => setTimeout(r, 5000));
+    }
+    setImmediate(poll);
+  }
+
+  poll();
+  console.log('🤖 Telegram Bot successfully initialized and polling for messages!');
 }
 
 function startBackgroundWorker() {
@@ -188,10 +190,6 @@ function startBackgroundWorker() {
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Runner listening on port ${PORT}`);
   const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (token) {
-    startTelegramBot(token);
-  } else {
-    console.error('❌ TELEGRAM_BOT_TOKEN is not set; Telegram bot disabled.');
-  }
+  startTelegramBot(token);
   startBackgroundWorker();
 });
