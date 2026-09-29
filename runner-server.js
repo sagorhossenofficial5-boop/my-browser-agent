@@ -1,6 +1,6 @@
 const express = require('express');
 const puppeteer = require('puppeteer');
-const { Telegraf } = require('telegraf');
+const TelegramBot = require('node-telegram-bot-api');
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
@@ -118,19 +118,46 @@ app.post('/agent-command', async (req, res) => {
 function startTelegramBot() {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) {
-    console.log('TELEGRAM_BOT_TOKEN is not set; Telegram bot disabled.');
+    console.error('❌ TELEGRAM_BOT_TOKEN is not set; Telegram bot disabled.');
     return null;
   }
 
-  const bot = new Telegraf(token);
-  bot.start((ctx) => ctx.reply('Bot & Agent are running 24/7'));
-  bot.command('status', (ctx) => ctx.reply('🟢 Browser Agent is online on Render.'));
-  bot.command('health', async (ctx) => ctx.reply(`🟢 ${new Date().toISOString()}`));
-  bot.catch((err) => console.error('Telegram bot error:', err));
-  bot.launch().then(() => console.log('Telegram bot started.')).catch((err) => console.error('Telegram launch failed:', err));
+  const bot = new TelegramBot(token, { polling: true });
+  console.log('🤖 Telegram Bot initialized and polling for messages...');
 
-  process.once('SIGINT', () => bot.stop('SIGINT'));
-  process.once('SIGTERM', () => bot.stop('SIGTERM'));
+  bot.on('polling_error', (err) => {
+    console.error('Telegram Polling Error:', err.message);
+  });
+
+  const reply = (msg, text) => bot.sendMessage(msg.chat.id, text).catch((err) => {
+    console.error('Telegram sendMessage error:', err.message);
+  });
+
+  const handleText = (msg) => {
+    const text = String(msg.text || '').trim().toLowerCase();
+    if (!text) return;
+
+    if (text === '/start' || text === 'start') {
+      return reply(msg, '🤖 Bot & Browser Agent are running 24/7 on Render.');
+    }
+    if (text === '/health' || text === 'health') {
+      return reply(msg, `🟢 Healthy — ${new Date().toISOString()}`);
+    }
+    if (text === '/status' || text === 'status') {
+      return reply(msg, '🟢 Browser Agent is online and ready.');
+    }
+    if (text === 'hi' || text === 'hello') {
+      return reply(msg, '👋 Hello! Browser Agent is online. Send /status or /health.');
+    }
+    if (text === 'login') {
+      return reply(msg, '🔐 Login command received. Browser automation is ready.');
+    }
+  };
+
+  bot.on('message', handleText);
+  bot.on('polling_error', (err) => console.error('Telegram polling_error:', err.message));
+
+  console.log('🤖 Telegram Bot handlers registered (/start, /health, /status, start, hi, hello, login).');
   return bot;
 }
 
