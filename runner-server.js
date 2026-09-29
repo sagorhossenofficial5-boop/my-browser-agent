@@ -116,11 +116,40 @@ app.post('/agent-command', async (req, res) => {
 
 async function startTelegramBot(token) {
   try {
-    const pkg = await import('node-telegram-bot-api');
-    const TelegramBot = pkg.default?.default || pkg.default || pkg;
+    const rawModule = await import('node-telegram-bot-api');
+    let TelegramBot = rawModule;
+
+    while (TelegramBot && typeof TelegramBot !== 'function') {
+      if (TelegramBot.default) {
+        TelegramBot = TelegramBot.default;
+      } else if (TelegramBot.TelegramBot) {
+        TelegramBot = TelegramBot.TelegramBot;
+      } else {
+        break;
+      }
+    }
+
+    if (typeof TelegramBot !== 'function') {
+      const { createRequire } = await import('module');
+      const localRequire = createRequire(__filename);
+      TelegramBot = localRequire('node-telegram-bot-api');
+
+      while (TelegramBot && typeof TelegramBot !== 'function') {
+        if (TelegramBot.default) {
+          TelegramBot = TelegramBot.default;
+        } else if (TelegramBot.TelegramBot) {
+          TelegramBot = TelegramBot.TelegramBot;
+        } else {
+          break;
+        }
+      }
+    }
+
+    if (typeof TelegramBot !== 'function') {
+      throw new TypeError('Unable to resolve node-telegram-bot-api constructor');
+    }
 
     const bot = new TelegramBot(token, { polling: true });
-
     console.log('🤖 Telegram Bot initialized and polling for messages...');
 
     bot.on('polling_error', (err) => console.error('Telegram Polling Error:', err.message));
