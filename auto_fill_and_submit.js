@@ -1,96 +1,80 @@
-const puppeteer = require('puppeteer-core');
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-(async () => {
-  const browser = await puppeteer.launch({
-    headless: false,
-    executablePath: '/usr/bin/google-chrome',
-    userDataDir: './saved_session',
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-blink-features=AutomationControlled',
-      '--start-maximized'
-    ]
+/**
+ * Runs the existing Luma sign-in automation against the caller's active Puppeteer page.
+ * The browser/page lifecycle remains owned by runner-server.js.
+ */
+async function autoFillAndSubmit(page, options = {}) {
+  const email = options.email || process.env.LOGIN_EMAIL || 'sagor.hossen.official5@gmail.com';
+  const password = options.password || process.env.LOGIN_PASSWORD;
+
+  if (!password) {
+    throw new Error('LOGIN_PASSWORD is not configured');
+  }
+
+  page.setDefaultNavigationTimeout(20000);
+  page.setDefaultTimeout(8000);
+
+  console.log('Navigating to Luma sign-up...');
+  await page.goto('https://auth.lumalabs.ai/sign-up', {
+    waitUntil: 'domcontentloaded',
+    timeout: 20000
   });
+  await sleep(2000);
 
-  const page = await browser.newPage();
-  await page.setViewport({ width: 1280, height: 800 });
-
-  console.log('Navigating to Luma...');
-  await page.goto('https://auth.lumalabs.ai/sign-up', { waitUntil: 'networkidle2', timeout: 60000 });
-  await new Promise(r => setTimeout(r, 4000));
-
-  // স্টেপ ১: গুগল সাইন-ইন চেষ্টা করা
   console.log('Trying Google Sign-in...');
   const googleBtnFound = await page.evaluate(() => {
-    const btns = Array.from(document.querySelectorAll('button, a, div[role="button"]'));
-    const gBtn = btns.find(b => {
-      const txt = (b.innerText || '').toLowerCase();
-      return txt.includes('google') || txt.includes('continue with google') || txt.includes('sign in with google');
+    const buttons = Array.from(document.querySelectorAll('button, a, div[role="button"]'));
+    const button = buttons.find((b) => {
+      const text = (b.innerText || b.getAttribute('aria-label') || '').toLowerCase();
+      return text.includes('google') || text.includes('continue with google') || text.includes('sign in with google');
     });
-    if (gBtn) {
-      gBtn.click();
+    if (button) {
+      button.click();
       return true;
     }
     return false;
-  });
+  }).catch(() => false);
 
-  await new Promise(r => setTimeout(r, 4000));
-
-  // যদি গুগল উইন্ডো ওপেন হয় তবে অ্যাকাউন্ট ক্লিক করা
-  const pages = await browser.pages();
-  const targetPage = pages[pages.length - 1];
-
-  let googleSuccess = false;
-  try {
-    const accSelector = 'div[data-identifier], div[data-email], li[data-authuser]';
-    await targetPage.waitForSelector(accSelector, { timeout: 5000 });
-    await targetPage.click(accSelector);
-    console.log('Google account selected!');
-    googleSuccess = true;
-  } catch (e) {
-    console.log('Google auto-select not triggered or blocked.');
-  }
-
-  // স্টেপ ২: যদি গুগল না হয়, তবে ইমেইল + পাসওয়ার্ড অপশন দিয়ে ঢুকবে
-  if (!googleSuccess) {
-    console.log('Switching to email & password entry...');
-
-    // ইমেইল ইনপুট
-    await page.evaluate(() => {
-      const inputs = Array.from(document.querySelectorAll('input'));
-      const emailInput = inputs.find(i => i.type === 'email' || (i.placeholder && i.placeholder.toLowerCase().includes('email')) || i.name === 'email');
-      if (emailInput) {
-        emailInput.focus();
-        emailInput.value = 'sagor.hossen.official5@gmail.com';
-        emailInput.dispatchEvent(new Event('input', { bubbles: true }));
-        emailInput.dispatchEvent(new Event('change', { bubbles: true }));
-      }
-    });
-
-    // Continue / Next বাটন ক্লিক
-    await page.evaluate(() => {
-      const btns = Array.from(document.querySelectorAll('button'));
-      const nextBtn = btns.find(b => {
-        const txt = (b.innerText || '').toLowerCase();
-        return txt.includes('continue') || txt.includes('next') || txt.includes('sign in') || txt.includes('log in');
-      });
-      if (nextBtn) nextBtn.click();
-    });
-
-    // পাসওয়ার্ড ফিল্ড আসা পর্যন্ত অপেক্ষা করা
-    console.log('Waiting for password input field...');
+  if (googleBtnFound) {
+    await sleep(3000);
+    const pages = await page.browser().pages();
+    const targetPage = pages[pages.length - 1];
     try {
-      await page.waitForSelector('input[type="password"]', { timeout: 8000 });
-      await page.type('input[type="password"]', 'Ami@sagor321?#&*.', { delay: 100 });
-      console.log('Password entered!');
-      await page.keyboard.press('Enter');
-    } catch (e) {
-      console.log('Direct password input not found yet, checking current state...');
+      await targetPage.waitForSelector('div[data-identifier], div[data-email], li[data-authuser]', { timeout: 5000 });
+      await targetPage.click('div[data-identifier], div[data-email], li[data-authuser]');
+      console.log('Google account selection was available.');
+      return { page: targetPage, method: 'google', success: true };
+    } catch {
+      console.log('Google account selection not available; continuing with email/password.');
     }
   }
 
-  await new Promise(r => setTimeout(r, 7000));
-  await page.screenshot({ path: '/workspaces/my-browser-agent/downloads/after_submit.png' });
-  console.log('Updated screenshot captured at downloads/after_submit.png');
-})();
+  console.log('Using email/password flow...');
+  const emailInput = await page.$('input[type="email"], input[name="email"], input[placeholder*="email" i]');
+  if (!emailInput) throw new Error('Luma email field not found');
+  await emailInput.click({ clickCount: 3 });
+  await emailInput.type(email, { delay: 30 });
+
+  const continueButton = await page.$('button, input[type="submit"], a');
+  if (continueButton) {
+    const clicked = await page.evaluate(() => {
+      const nodes = Array.from(document.querySelectorAll('button, input[type="submit"], a'));
+      const node = nodes.find((el) => /continue|next|sign in|log in/i.test((el.innerText || el.value || el.getAttribute('aria-label') || '').trim()));
+      if (!node) return false;
+      node.click();
+      return true;
+    }).catch(() => false);
+    if (clicked) await sleep(1500);
+  }
+
+  const passwordInput = await page.waitForSelector('input[type="password"]', { timeout: 8000 });
+  await passwordInput.click();
+  await passwordInput.type(password, { delay: 30 });
+  await page.keyboard.press('Enter');
+  await sleep(4000);
+
+  return { page, method: 'password', success: true };
+}
+
+module.exports = autoFillAndSubmit;
