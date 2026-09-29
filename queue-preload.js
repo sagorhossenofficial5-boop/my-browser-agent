@@ -24,6 +24,16 @@ async function drain() {
         try { return originalEnd.apply(this, args); }
         finally { finish(); }
       };
+      const originalSend = job.res.send;
+      const originalJson = job.res.json;
+      job.res.send = function (...args) {
+        try { return originalSend.apply(this, args); }
+        finally { finish(); }
+      };
+      job.res.json = function (...args) {
+        try { return originalJson.apply(this, args); }
+        finally { finish(); }
+      };
       try {
         Promise.resolve(job.handler(job.req, job.res, job.next)).catch((err) => {
           if (!job.res.headersSent) job.res.status(500).json({ success: false, error: err.message });
@@ -33,11 +43,6 @@ async function drain() {
         if (!job.res.headersSent) job.res.status(500).json({ success: false, error: err.message });
         finish();
       }
-      // Express handlers can end through send/json rather than end directly.
-      const originalSend = job.res.send;
-      const originalJson = job.res.json;
-      job.res.send = function (...args) { try { return originalSend.apply(this, args); } finally { finish(); } };
-      job.res.json = function (...args) { try { return originalJson.apply(this, args); } finally { finish(); } };
       setTimeout(finish, 120000);
     });
   } finally {
@@ -52,7 +57,10 @@ express.application.post = function (path, ...handlers) {
       queue.push({ req, res, next, handler: handlers[handlers.length - 1] });
       drain();
     };
-    const middleware = handlers.length === 1 ? wrapped : [...handlers.slice(0, -1), wrapped];
+    // Always pass an iterable array to Express's original .post implementation.
+    const middleware = handlers.length === 1
+      ? [wrapped]
+      : [...handlers.slice(0, -1), wrapped];
     return originalPost.call(this, path, ...middleware);
   }
   return originalPost.call(this, path, ...handlers);
