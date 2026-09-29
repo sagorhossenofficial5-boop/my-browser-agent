@@ -1,4 +1,7 @@
 {
+  "scripts": {
+    "start": "node runner-server.js"
+  },
   "dependencies": {
     "@browserbasehq/stagehand": "^4.1.0",
     "@google/genai": "^2.22.0",
